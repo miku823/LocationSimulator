@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Location Map</title>
+  <style>
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0B0F14; }
+    body { font-family: "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei", sans-serif; color: #E7EEF7; }
+    #map {
+      position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden;
+      background-color: #0B0F14;
+      background-image:
+        linear-gradient(rgba(56, 189, 248, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.07) 1px, transparent 1px);
+      background-size: 48px 48px;
+      touch-action: none;
+      cursor: crosshair;
+    }
+    #tileLayer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+    .tile {
+      position: absolute; width: 256px; height: 256px; pointer-events: none;
+      filter: grayscale(0.32) brightness(0.88) contrast(1.0) saturate(0.8);
+      opacity: 0; transition: opacity 0.22s ease;
+    }
+    .tile.loaded { opacity: 1; }
+    .tile.failed { display: none; }
+    #mask, #grid { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+    #mask {
+      background:
+        radial-gradient(115% 85% at 50% 42%, rgba(10, 18, 28, 0) 0%, rgba(10, 18, 28, 0.28) 55%,
+          rgba(5, 9, 14, 0.82) 100%),
+        linear-gradient(180deg, rgba(9, 18, 30, 0.62) 0%, rgba(13, 38, 58, 0.30) 48%,
+          rgba(8, 13, 20, 0.62) 100%);
+    }
+    #grid {
+      background-image:
+        linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px);
+      background-size: 44px 44px;
+      -webkit-mask-image: radial-gradient(100% 100% at 50% 50%, rgba(0, 0, 0, 0.8) 0%,
+        rgba(0, 0, 0, 0.2) 68%, transparent 100%);
+      mask-image: radial-gradient(100% 100% at 50% 50%, rgba(0, 0, 0, 0.8) 0%,
+        rgba(0, 0, 0, 0.2) 68%, transparent 100%);
+    }
+    #overlay svg path, #overlay svg rect { filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.45)); }
+    #overlay, #markers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+    .marker {
+      position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+      background: #38BDF8; border: 2px solid #06121B; box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.16);
+    }
+    .marker.idx {
+      width: 20px; height: 20px; margin: -10px 0 0 -10px; background: #0B0F14; color: #38BDF8;
+      border: 1px solid #38BDF8; display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; box-shadow: none;
+    }
+    .marker.pin {
+      width: 20px; height: 20px; margin: -10px 0 0 -10px; background: #F59E0B; border: 3px solid #0B0F14;
+      box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.18);
+    }
+    .marker.sim {
+      width: 18px; height: 18px; margin: -9px 0 0 -9px; background: #22C55E; border: 3px solid #04210F;
+      box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.20), 0 0 18px rgba(34, 197, 94, 0.55);
+      z-index: 9;
+    }
+    #hud {
+      position: absolute; left: 12px; top: 12px; right: 12px;
+      display: flex; align-items: flex-start; justify-content: space-between;
+      pointer-events: none;
+    }
+    #tip {
+      max-width: 66%; padding: 6px 10px; border-radius: 8px; font-size: 11px; line-height: 1.4;
+      color: #A9C0D6; background: rgba(8, 14, 20, 0.72);
+      border: 1px solid rgba(56, 189, 248, 0.22); backdrop-filter: blur(6px);
+    }
+    #coord {
+      padding: 6px 9px; border-radius: 8px; font-size: 10px; letter-spacing: 0.3px;
+      color: #7FD7FF; background: rgba(8, 14, 20, 0.72);
+      border: 1px solid rgba(56, 189, 248, 0.22); font-variant-numeric: tabular-nums;
+    }
+    #zoombar {
+      position: absolute; right: 12px; bottom: 40px; display: flex; flex-direction: column;
+      border-radius: 10px; overflow: hidden; border: 1px solid rgba(56, 189, 248, 0.25);
+      background: rgba(8, 14, 20, 0.82); backdrop-filter: blur(6px);
+    }
+    .zb {
+      width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+      color: #7FD7FF; font-size: 18px; font-weight: 600; user-select: none;
+    }
+    .zb + .zb { border-top: 1px solid rgba(56, 189, 248, 0.18); }
+    #attr {
+      position: absolute; right: 10px; bottom: 12px; font-size: 9px; color: rgba(169, 192, 214, 0.62);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map">
+    <div id="tileLayer"></div>
+    <div id="mask"></div>
+    <div id="grid"></div>
+    <div id="overlay"></div>
+    <div id="markers"></div>
+    <div id="hud">
+      <div id="tip">点击地图添加点位 · 拖动平移</div>
+      <div id="coord">39.904200, 116.407400</div>
+    </div>
+    <div id="zoombar">
+      <div class="zb" id="zin">+</div>
+      <div class="zb" id="zout">&minus;</div>
+    </div>
+    <div id="attr">&copy; 高德地图</div>
+  </div>
+  <script>
+    (function () {
+      'use strict';
+
+      var TILE = 256;
+      var MIN_ZOOM = 3;
+      var MAX_ZOOM = 18;
+
+      // 花瓣地图（华为 Map Kit Tile API）API Key，从 AGC 获取；留空则使用国内可达的高德瓦片
+      var PETAL_KEY = '';
+      // 花瓣与高德瓦片均为国内 GCJ-02 加密坐标，内部点位仍按 WGS-84 存储，绘制时做一次偏移换算
+      var DATUM_GCJ = true;
+
+      var mapEl = document.getElementById('map');
+      var tileLayer = document.getElementById('tileLayer');
+      var overlay = document.getElementById('overlay');
+      var markers = document.getElementById('markers');
+      var tipEl = document.getElementById('tip');
+      var coordEl = document.getElementById('coord');
+
+      var view = { lat: 39.9042, lng: 116.4074, zoom: 12 };
+      var state = { mode: 'pick', points: [], pin: null, sim: null, rect: null };
+      var tiles = {};
+      var rafId = 0;
+
+      function worldSize(z) { return TILE * Math.pow(2, z); }
+
+      function worldX(lng, z) { return (lng + 180) / 360 * worldSize(z); }
+
+      function worldY(lat, z) {
+        var r = lat * Math.PI / 180;
+        return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * worldSize(z);
+      }
+
+      function lngOf(x, z) { return x / worldSize(z) * 360 - 180; }
+
+      function latOf(y, z) {
+        var n = Math.PI - 2 * Math.PI * y / worldSize(z);
+        return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+      }
+
+      // —— GCJ-02 偏移换算（只在花瓣地图底图启用时生效）——
+      function outOfChina(lat, lng) {
+        return !(lng > 73.66 && lng < 135.05 && lat > 3.86 && lat < 53.55);
+      }
+
+      function transformLat(x, y) {
+        var ret = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        ret += (20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2 / 3;
+        ret += (20 * Math.sin(y * Math.PI) + 40 * Math.sin(y / 3 * Math.PI)) * 2 / 3;
+        ret += (160 * Math.sin(y / 12 * Math.PI) + 320 * Math.sin(y * Math.PI / 30)) * 2 / 3;
+        return ret;
+      }
+
+      function transformLng(x, y) {
+        var ret = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        ret += (20 * Math.sin(6 * x * Math.PI) + 20 * Math.sin(2 * x * Math.PI)) * 2 / 3;
+        ret += (20 * Math.sin(x * Math.PI) + 40 * Math.sin(x / 3 * Math.PI)) * 2 / 3;
+        ret += (150 * Math.sin(x / 12 * Math.PI) + 300 * Math.sin(x / 30 * Math.PI)) * 2 / 3;
+        return ret;
+      }
+
+      function wgs2gcj(lat, lng) {
+        if (outOfChina(lat, lng)) { return { lat: lat, lng: lng }; }
+        var a = 6378245.0;
+        var ee = 0.00669342162296594323;
+        var dLat = transformLat(lng - 105.0, lat - 35.0);
+        var dLng = transformLng(lng - 105.0, lat - 35.0);
+        var radLat = lat / 180.0 * Math.PI;
+        var magic = Math.sin(radLat);
+        magic = 1 - ee * magic * magic;
+        var sqrtMagic = Math.sqrt(magic);
+        dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * Math.PI);
+        dLng = (dLng * 180.0) / (a / sqrtMagic * Math.cos(radLat) * Math.PI);
+        return { lat: lat + dLat, lng: lng + dLng };
+      }
+
+      function datumDelta(lat, lng) {
+        if (!DATUM_GCJ) { return { lat: 0, lng: 0 }; }
+        var g = wgs2gcj(lat, lng);
+        return { lat: g.lat - lat, lng: g.lng - lng };
+      }
+
+      function mapSize() { return { w: mapEl.clientWidth, h: mapEl.clientHeight }; }
+
+      function project(lat, lng) {
+        var sz = mapSize();
+        var z = view.zoom;
+        var d = datumDelta(view.lat, view.lng);
+        return {
+          x: sz.w / 2 + worldX(lng + d.lng, z) - worldX(view.lng + d.lng, z),
+          y: sz.h / 2 + worldY(lat + d.lat, z) - worldY(view.lat + d.lat, z)
+        };
+      }
+
+      function unproject(x, y) {
+        var sz = mapSize();
+        var z = view.zoom;
+        var d = datumDelta(view.lat, view.lng);
+        return {
+          lat: latOf(worldY(view.lat + d.lat, z) + (y - sz.h / 2), z) - d.lat,
+          lng: lngOf(worldX(view.lng + d.lng, z) + (x - sz.w / 2), z) - d.lng
+        };
+      }
+
+      function clampZoom(z) { return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z)); }
+
+      function send(name, args) {
+        try {
+          if (window.bridge && typeof window.bridge[name] === 'function') {
+            window.bridge[name].apply(window.bridge, args);
+          }
+        } catch (err) {
+          // 桥接对象尚未注入时忽略
+        }
+      }
+
+      function updateTip() {
+        if (state.mode === 'rect') {
+          tipEl.textContent = '按住拖动框选区域 · 松手完成';
+        } else if (state.points.length === 0) {
+          tipEl.textContent = '点击地图添加点位 · 拖动平移';
+        } else {
+          tipEl.textContent = '已选 ' + state.points.length + ' 个点 · 继续点击可追加';
+        }
+      }
+
+      function updateCoord(lat, lng) {
+        coordEl.textContent = lat.toFixed(6) + ', ' + lng.toFixed(6);
+      }
+
+      // 底图源：配了花瓣 key 用华为 Map Kit，否则用高德街道图（4 个子域）并回落卫星图
+      function amapStreet(sub) {
+        return function (z, x, y) {
+          return 'https://webrd' + sub + '.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x=' +
+            x + '&y=' + y + '&z=' + z;
+        };
+      }
+
+      function amapSat(sub) {
+        return function (z, x, y) {
+          return 'https://webst' + sub + '.is.autonavi.com/appmaptile?style=6&x=' + x + '&y=' + y + '&z=' + z;
+        };
+      }
+
+      var TILE_SOURCES = PETAL_KEY.length > 0 ? [
+        function (z, x, y) {
+          return 'https://mapapi.cloud.huawei.com/mapApi/v1/mapService/getTile?x=' + x + '&y=' + y +
+            '&z=' + z + '&language=zh_CN&scale=1&key=' + encodeURIComponent(PETAL_KEY);
+        }
+      ] : [
+        amapStreet('01'),
+        amapStreet('02'),
+        amapStreet('03'),
+        amapStreet('04'),
+        amapSat('01'),
+        amapSat('02')
+      ];
+
+      function tileUrl(stage, z, x, y) { return TILE_SOURCES[stage](z, x, y); }
+
+      function renderTiles() {
+        var sz = mapSize();
+        var z = view.zoom;
+        var n = Math.pow(2, z);
+        var d = datumDelta(view.lat, view.lng);
+        var left = worldX(view.lng + d.lng, z) - sz.w / 2;
+        var top = worldY(view.lat + d.lat, z) - sz.h / 2;
+        var x0 = Math.floor(left / TILE);
+        var y0 = Math.floor(top / TILE);
+        var x1 = Math.floor((left + sz.w - 1) / TILE);
+        var y1 = Math.floor((top + sz.h - 1) / TILE);
+        var keys = [];
+
+        for (var x = x0; x <= x1; x++) {
+          for (var y = y0; y <= y1; y++) {
+            if (y < 0 || y >= n) { continue; }
+            var tx = ((x % n) + n) % n;
+            var key = z + '_' + tx + '_' + y;
+            var img = tiles[key];
+            if (!img) {
+              img = new Image();
+              img.className = 'tile';
+              img.dataset.key = key;
+              img.dataset.z = z;
+              img.dataset.x = tx;
+              img.dataset.y = y;
+              img.dataset.stage = '0';
+              img.onload = function () { this.classList.add('loaded'); };
+              img.onerror = function () {
+                var next = parseInt(this.dataset.stage, 10) + 1;
+                if (next < TILE_SOURCES.length) {
+                  this.dataset.stage = next;
+                  this.src = tileUrl(next, parseInt(this.dataset.z, 10),
+                    parseInt(this.dataset.x, 10), parseInt(this.dataset.y, 10));
+                } else {
+                  this.classList.add('failed');
+                }
+              };
+              img.src = tileUrl(0, z, tx, y);
+              tiles[key] = img;
+            }
+            img.style.left = Math.round(x * TILE - left) + 'px';
+            img.style.top = Math.round(y * TILE - top) + 'px';
+            if (img.parentNode !== tileLayer) { tileLayer.appendChild(img); }
+            keys.push(key);
+          }
+        }
+
+        for (var i = tileLayer.children.length - 1; i >= 0; i--) {
+          var el = tileLayer.children[i];
+          if (keys.indexOf(el.dataset.key) < 0) { tileLayer.removeChild(el); }
+        }
+      }
+
+      function renderOverlay() {
+        var svg = '';
+        if (state.points.length > 1) {
+          var d = '';
+          for (var i = 0; i < state.points.length; i++) {
+            var q = project(state.points[i].lat, state.points[i].lng);
+            d += (i === 0 ? 'M' : 'L') + q.x.toFixed(1) + ' ' + q.y.toFixed(1) + ' ';
+          }
+          svg += '<path d="' + d + '" fill="none" stroke="#38BDF8" stroke-opacity="0.8" stroke-width="3" ' +
+            'stroke-linecap="round" stroke-linejoin="round"/>';
+        }
+        if (state.rect) {
+          var a = project(state.rect.a.lat, state.rect.a.lng);
+          var b = project(state.rect.b.lat, state.rect.b.lng);
+          var rx = Math.min(a.x, b.x);
+          var ry = Math.min(a.y, b.y);
+          var rw = Math.abs(a.x - b.x);
+          var rh = Math.abs(a.y - b.y);
+          svg += '<rect x="' + rx + '" y="' + ry + '" width="' + rw + '" height="' + rh + '" ' +
+            'fill="rgba(56,189,248,0.10)" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="6 4"/>';
+        }
+        overlay.innerHTML = '<svg width="100%" height="100%" style="display:block">' + svg + '</svg>';
+      }
+
+      function renderMarkers() {
+        var html = '';
+        for (var i = 0; i < state.points.length; i++) {
+          var p = project(state.points[i].lat, state.points[i].lng);
+          html += '<div class="marker idx" style="left:' + p.x + 'px;top:' + p.y + 'px">' + (i + 1) + '</div>';
+        }
+        if (state.pin) {
+          var pin = project(state.pin.lat, state.pin.lng);
+          html += '<div class="marker pin" style="left:' + pin.x + 'px;top:' + pin.y + 'px"></div>';
+        }
+        if (state.sim) {
+          var sim = project(state.sim.lat, state.sim.lng);
+          html += '<div class="marker sim" style="left:' + sim.x + 'px;top:' + sim.y + 'px"></div>';
+        }
+        markers.innerHTML = html;
+      }
+
+      function renderAll() {
+        renderTiles();
+        renderOverlay();
+        renderMarkers();
+      }
+
+      function scheduleRender() {
+        if (rafId) { return; }
+        rafId = requestAnimationFrame(function () {
+          rafId = 0;
+          renderAll();
+        });
+      }
+
+      function panBy(dx, dy) {
+        var z = view.zoom;
+        view.lng = lngOf(worldX(view.lng, z) - dx, z);
+        view.lat = latOf(worldY(view.lat, z) - dy, z);
+        scheduleRender();
+      }
+
+      function setZoom(z) {
+        var nz = clampZoom(z);
+        if (nz === view.zoom) { return; }
+        view.zoom = nz;
+        renderAll();
+      }
+
+      function addPoint(lat, lng, notify) {
+        state.points.push({ lat: lat, lng: lng });
+        state.pin = { lat: lat, lng: lng };
+        updateCoord(lat, lng);
+        renderAll();
+        updateTip();
+        if (notify) { send('onPick', [lat, lng]); }
+      }
+
+      var pointers = {};
+      var drag = null;
+
+      function localPos(e) {
+        var r = mapEl.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      }
+
+      function twoDistance() {
+        var ids = Object.keys(pointers);
+        if (ids.length < 2) { return 0; }
+        var a = pointers[ids[0]];
+        var b = pointers[ids[1]];
+        var dx = a.x - b.x;
+        var dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
+
+      mapEl.addEventListener('pointerdown', function (e) {
+        try { mapEl.setPointerCapture(e.pointerId); } catch (err) { }
+        var p = localPos(e);
+        pointers[e.pointerId] = p;
+        var count = Object.keys(pointers).length;
+
+        if (count === 1) {
+          if (state.mode === 'rect') {
+            drag = { type: 'rect', start: p, moved: false };
+            var ll = unproject(p.x, p.y);
+            state.rect = { a: ll, b: ll };
+            renderOverlay();
+          } else {
+            drag = { type: 'pan', start: p, last: p, moved: false };
+          }
+        } else if (count === 2) {
+          var ids = Object.keys(pointers);
+          pointers[ids[0]] = pointers[ids[0]];
+          pointers[ids[1]] = pointers[ids[1]];
+          drag = { type: 'pinch', dist: twoDistance(), zoom: view.zoom };
+          if (state.mode === 'rect') {
+            state.rect = null;
+            renderOverlay();
+          }
+        }
+      });
+
+      mapEl.addEventListener('pointermove', function (e) {
+        if (!pointers[e.pointerId] || !drag) { return; }
+        var p = localPos(e);
+        pointers[e.pointerId] = p;
+
+        if (drag.type === 'pan') {
+          var dx = p.x - drag.last.x;
+          var dy = p.y - drag.last.y;
+          if (Math.abs(p.x - drag.start.x) + Math.abs(p.y - drag.start.y) > 6) { drag.moved = true; }
+          drag.last = p;
+          panBy(dx, dy);
+        } else if (drag.type === 'rect') {
+          if (Math.abs(p.x - drag.start.x) + Math.abs(p.y - drag.start.y) > 6) { drag.moved = true; }
+          if (drag.moved) {
+            var start = unproject(drag.start.x, drag.start.y);
+            var now = unproject(p.x, p.y);
+            state.rect = { a: start, b: now };
+            updateCoord(now.lat, now.lng);
+            renderOverlay();
+          }
+        } else if (drag.type === 'pinch') {
+          var dist = twoDistance();
+          if (dist > 0) {
+            var target = Math.round(drag.zoom + Math.log(dist / drag.dist) / Math.log(2));
+            setZoom(target);
+          }
+        }
+      });
+
+      function endPointer(e) {
+        var p = pointers[e.pointerId];
+        delete pointers[e.pointerId];
+        if (!drag) { return; }
+        var d = drag;
+        drag = null;
+
+        if (d.type === 'pan' && p) {
+          if (!d.moved) {
+            var ll = unproject(p.x, p.y);
+            addPoint(ll.lat, ll.lng, true);
+          }
+        } else if (d.type === 'rect') {
+          if (d.moved && state.rect) {
+            updateTip();
+            send('onRect', [state.rect.a.lat, state.rect.a.lng, state.rect.b.lat, state.rect.b.lng]);
+          } else {
+            state.rect = null;
+            renderOverlay();
+          }
+        }
+        if (Object.keys(pointers).length > 0) {
+          drag = null;
+        }
+      }
+
+      mapEl.addEventListener('pointerup', endPointer);
+      mapEl.addEventListener('pointercancel', endPointer);
+
+      mapEl.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        setZoom(view.zoom + (e.deltaY < 0 ? 1 : -1));
+      }, { passive: false });
+
+      mapEl.addEventListener('dblclick', function (e) {
+        e.preventDefault();
+        setZoom(view.zoom + 1);
+      });
+
+      document.getElementById('zin').addEventListener('click', function () { setZoom(view.zoom + 1); });
+      document.getElementById('zout').addEventListener('click', function () { setZoom(view.zoom - 1); });
+
+      window.mapApi = {
+        setMode: function (m) {
+          state.mode = (m === 'rect') ? 'rect' : 'pick';
+          updateTip();
+        },
+        setPoints: function (pts) {
+          state.points = pts || [];
+          state.pin = state.points.length ? state.points[state.points.length - 1] : null;
+          renderAll();
+          updateTip();
+        },
+        setPin: function (lat, lng) {
+          state.pin = { lat: lat, lng: lng };
+          updateCoord(lat, lng);
+          renderMarkers();
+        },
+        center: function (lat, lng, zoom) {
+          view.lat = lat;
+          view.lng = lng;
+          if (zoom) { view.zoom = clampZoom(zoom); }
+          updateCoord(lat, lng);
+          renderAll();
+        },
+        setSim: function (lat, lng) {
+          state.sim = { lat: lat, lng: lng };
+          updateCoord(lat, lng);
+          renderMarkers();
+        },
+        clearSim: function () {
+          state.sim = null;
+          renderMarkers();
+        },
+        clearRect: function () {
+          state.rect = null;
+          renderOverlay();
+        },
+        zoomIn: function () { setZoom(view.zoom + 1); },
+        zoomOut: function () { setZoom(view.zoom - 1); }
+      };
+
+      window.addEventListener('resize', function () { renderAll(); });
+
+      document.getElementById('attr').textContent = PETAL_KEY.length > 0 ? '© 华为花瓣地图' : '© 高德地图';
+
+      updateTip();
+      updateCoord(view.lat, view.lng);
+      renderAll();
+    })();
+  </script>
+</body>
+</html>
